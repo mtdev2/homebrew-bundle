@@ -3,13 +3,9 @@
 require "spec_helper"
 
 describe Bundle::WhalebrewInstaller do
-  def do_install
-    Bundle::WhalebrewInstaller.install("whalebrew/wget")
-  end
-
   describe ".installed_images" do
     it "shells out" do
-      described_class.installed_images
+      expect { described_class.installed_images }.not_to raise_error
     end
   end
 
@@ -21,7 +17,7 @@ describe Bundle::WhalebrewInstaller do
 
       it "returns true" do
         allow(Bundle::WhalebrewDumper).to receive(:images).and_return(["whalebrew/wget"])
-        expect(described_class.image_installed?("whalebrew/wget")).to eq(true)
+        expect(described_class.image_installed?("whalebrew/wget")).to be(true)
       end
     end
 
@@ -32,7 +28,7 @@ describe Bundle::WhalebrewInstaller do
 
       it "returns false" do
         allow(Bundle::WhalebrewDumper).to receive(:images).and_return([])
-        expect(described_class.image_installed?("test/doesnotexist")).to eq(false)
+        expect(described_class.image_installed?("test/doesnotexist")).to be(false)
       end
     end
   end
@@ -43,9 +39,9 @@ describe Bundle::WhalebrewInstaller do
     end
 
     it "successfully installs whalebrew" do
-      expect(Bundle).to receive(:system).with("brew", "install", "whalebrew", verbose: false)
+      expect(Bundle).to receive(:system).with(HOMEBREW_BREW_FILE, "install", "--formula", "whalebrew", verbose: false)
                                         .and_return(true)
-      expect { do_install }.to raise_error(RuntimeError)
+      expect { described_class.preinstall("whalebrew/wget") }.to raise_error(RuntimeError)
     end
   end
 
@@ -56,18 +52,19 @@ describe Bundle::WhalebrewInstaller do
                                        .and_return(true)
     end
 
-    it "successfully installs an image" do
-      expect { do_install }.not_to raise_error
-    end
-
     context "when the requested image is already installed" do
       before do
         allow(described_class).to receive(:image_installed?).with("whalebrew/wget").and_return(true)
       end
 
       it "skips" do
-        expect(do_install).to be(:skipped)
+        expect(described_class.preinstall("whalebrew/wget")).to be(false)
       end
+    end
+
+    it "successfully installs an image" do
+      expect(described_class.preinstall("whalebrew/wget")).to be(true)
+      expect { described_class.install("whalebrew/wget") }.not_to raise_error
     end
   end
 end

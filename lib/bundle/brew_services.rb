@@ -1,3 +1,4 @@
+# typed: true
 # frozen_string_literal: true
 
 module Bundle
@@ -11,14 +12,21 @@ module Bundle
     def stop(name, verbose: false)
       return true unless started?(name)
 
-      return unless Bundle.system "brew", "services", "stop", name, verbose: verbose
+      return unless Bundle.brew("services", "stop", name, verbose:)
 
       started_services.delete(name)
       true
     end
 
+    def start(name, verbose: false)
+      return unless Bundle.brew("services", "start", name, verbose:)
+
+      started_services << name
+      true
+    end
+
     def restart(name, verbose: false)
-      return unless Bundle.system "brew", "services", "restart", name, verbose: verbose
+      return unless Bundle.brew("services", "restart", name, verbose:)
 
       started_services << name
       true
@@ -30,12 +38,13 @@ module Bundle
 
     def started_services
       @started_services ||= if Bundle.services_installed?
-        `brew services list`.lines.map do |line|
+        states_to_skip = %w[stopped none]
+        Utils.safe_popen_read("brew", "services", "list").lines.filter_map do |line|
           name, state, _plist = line.split(/\s+/)
-          next if state == "stopped"
+          next if states_to_skip.include? state
 
           name
-        end.compact
+        end
       else
         []
       end

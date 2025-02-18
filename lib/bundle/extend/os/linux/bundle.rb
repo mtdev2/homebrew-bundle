@@ -1,3 +1,4 @@
+# typed: true
 # frozen_string_literal: true
 
 module Bundle
@@ -7,10 +8,6 @@ module Bundle
     end
 
     def cask_installed?
-      false
-    end
-
-    def services_installed?
       false
     end
   end

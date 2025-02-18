@@ -1,25 +1,25 @@
+# typed: true
 # frozen_string_literal: true
 
 module Bundle
   module Lister
     module_function
 
-    def list(entries, all: false, casks: false, taps: false, mas: false, whalebrew: false, brews: false)
+    def list(entries, brews:, casks:, taps:, mas:, whalebrew:, vscode:)
       entries.each do |entry|
-        if show?(entry.type, all: all, casks: casks, taps: taps, mas: mas, whalebrew: whalebrew, brews: brews)
-          puts entry.name
-        end
+        puts entry.name if show?(entry.type, brews:, casks:, taps:, mas:, whalebrew:, vscode:)
       end
     end
 
-    def self.show?(type, all: false, casks: false, taps: false, mas: false, whalebrew: false, brews: false)
-      return true if all
+    def show?(type, brews:, casks:, taps:, mas:, whalebrew:, vscode:)
+      return true if brews && type == :brew
       return true if casks && type == :cask
       return true if taps && type == :tap
       return true if mas && type == :mas
       return true if whalebrew && type == :whalebrew
-      return true if brews && type == :brew
-      return true if type == :brew && !casks && !taps && !mas && !whalebrew
+      return true if vscode && type == :vscode
+
+      false
     end
   end
 end

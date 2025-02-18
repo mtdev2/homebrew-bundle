@@ -1,3 +1,4 @@
+# typed: true
 # frozen_string_literal: true
 
 module Bundle
@@ -8,21 +9,30 @@ module Bundle
       @installed_images = nil
     end
 
-    def install(name, verbose: false, **_options)
+    def preinstall(name, verbose: false, **_options)
       unless Bundle.whalebrew_installed?
         puts "Installing whalebrew. It is not currently installed." if verbose
-        Bundle.system "brew", "install", "whalebrew", verbose: verbose
+        Bundle.brew("install", "--formula", "whalebrew", verbose:)
         raise "Unable to install #{name} app. Whalebrew installation failed." unless Bundle.whalebrew_installed?
       end
 
-      return :skipped if image_installed?(name)
+      if image_installed?(name)
+        puts "Skipping install of #{name} app. It is already installed." if verbose
+        return false
+      end
+
+      true
+    end
+
+    def install(name, preinstall: true, verbose: false, force: false, **_options)
+      return true unless preinstall
 
       puts "Installing #{name} image. It is not currently installed." if verbose
 
-      return :failed unless Bundle.system "whalebrew", "install", name, verbose: verbose
+      return false unless Bundle.system "whalebrew", "install", name, verbose: verbose
 
       installed_images << name
-      :success
+      true
     end
 
     def image_installed?(image)

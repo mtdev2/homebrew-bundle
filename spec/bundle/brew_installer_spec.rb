@@ -8,107 +8,250 @@ describe Bundle::BrewInstaller do
   let(:options) { { args: ["with-option"] } }
   let(:installer) { described_class.new(formula, options) }
 
-  def do_install
-    installer.run
-  end
+  context "when the formula is installed" do
+    before do
+      allow_any_instance_of(described_class).to receive(:installed?).and_return(true)
+    end
 
-  context "when the restart_service option is true" do
-    context "when the formula is installed successfully" do
+    context "with a true start_service option" do
       before do
-        allow_any_instance_of(described_class).to receive(:install_change_state!).and_return(:success)
+        allow_any_instance_of(described_class).to receive(:install_change_state!).and_return(true)
+        allow_any_instance_of(described_class).to receive(:installed?).and_return(true)
       end
 
-      it "restart service" do
-        expect(Bundle::BrewServices).to receive(:restart).with(formula, verbose: false).and_return(true)
-        described_class.install(formula, restart_service: true)
+      context "when service is already running" do
+        before do
+          allow(Bundle::BrewServices).to receive(:started?).with(formula).and_return(true)
+        end
+
+        context "with a successful installation" do
+          it "start service" do
+            expect(Bundle::BrewServices).not_to receive(:start)
+            described_class.preinstall(formula, start_service: true)
+            described_class.install(formula, start_service: true)
+          end
+        end
+
+        context "with a skipped installation" do
+          it "start service" do
+            expect(Bundle::BrewServices).not_to receive(:start)
+            described_class.install(formula, preinstall: false, start_service: true)
+          end
+        end
+      end
+
+      context "when service is not running" do
+        before do
+          allow(Bundle::BrewServices).to receive(:started?).with(formula).and_return(false)
+        end
+
+        context "with a successful installation" do
+          it "start service" do
+            expect(Bundle::BrewServices).to receive(:start).with(formula, verbose: false).and_return(true)
+            described_class.preinstall(formula, start_service: true)
+            described_class.install(formula, start_service: true)
+          end
+        end
+
+        context "with a skipped installation" do
+          it "start service" do
+            expect(Bundle::BrewServices).to receive(:start).with(formula, verbose: false).and_return(true)
+            described_class.install(formula, preinstall: false, start_service: true)
+          end
+        end
       end
     end
 
-    context "when a formula isn't installed" do
+    context "with an always restart_service option" do
       before do
-        allow_any_instance_of(described_class).to receive(:install_change_state!).and_return(:failed)
+        allow_any_instance_of(described_class).to receive(:install_change_state!).and_return(true)
+        allow_any_instance_of(described_class).to receive(:installed?).and_return(true)
       end
 
-      it "did not call restart service" do
-        expect(Bundle::BrewServices).not_to receive(:restart)
-        described_class.install(formula, restart_service: true)
+      context "with a successful installation" do
+        it "restart service" do
+          expect(Bundle::BrewServices).to receive(:restart).with(formula, verbose: false).and_return(true)
+          described_class.preinstall(formula, restart_service: :always)
+          described_class.install(formula, restart_service: :always)
+        end
+      end
+
+      context "with a skipped installation" do
+        it "restart service" do
+          expect(Bundle::BrewServices).to receive(:restart).with(formula, verbose: false).and_return(true)
+          described_class.install(formula, preinstall: false, restart_service: :always)
+        end
+      end
+    end
+
+    context "when the link option is true" do
+      before do
+        allow_any_instance_of(described_class).to receive(:install_change_state!).and_return(true)
+      end
+
+      it "links formula" do
+        allow_any_instance_of(described_class).to receive(:linked?).and_return(false)
+        expect(Bundle).to receive(:system).with(HOMEBREW_BREW_FILE, "link", "mysql",
+                                                verbose: false).and_return(true)
+        described_class.preinstall(formula, link: true)
+        described_class.install(formula, link: true)
+      end
+
+      it "force-links keg-only formula" do
+        allow_any_instance_of(described_class).to receive(:linked?).and_return(false)
+        allow_any_instance_of(described_class).to receive(:keg_only?).and_return(true)
+        expect(Bundle).to receive(:system).with(HOMEBREW_BREW_FILE, "link", "--force", "mysql",
+                                                verbose: false).and_return(true)
+        described_class.preinstall(formula, link: true)
+        described_class.install(formula, link: true)
+      end
+    end
+
+    context "when the link option is :overwrite" do
+      before do
+        allow_any_instance_of(described_class).to receive(:install_change_state!).and_return(true)
+      end
+
+      it "overwrite links formula" do
+        allow_any_instance_of(described_class).to receive(:linked?).and_return(false)
+        expect(Bundle).to receive(:system).with(HOMEBREW_BREW_FILE, "link", "--overwrite", "mysql",
+                                                verbose: false).and_return(true)
+        described_class.preinstall(formula, link: :overwrite)
+        described_class.install(formula, link: :overwrite)
+      end
+    end
+
+    context "when the link option is false" do
+      before do
+        allow_any_instance_of(described_class).to receive(:install_change_state!).and_return(true)
+      end
+
+      it "unlinks formula" do
+        allow_any_instance_of(described_class).to receive(:linked?).and_return(true)
+        expect(Bundle).to receive(:system).with(HOMEBREW_BREW_FILE, "unlink", "mysql",
+                                                verbose: false).and_return(true)
+        described_class.preinstall(formula, link: false)
+        described_class.install(formula, link: false)
+      end
+    end
+
+    context "when the link option is nil and formula is unlinked and not keg-only" do
+      before do
+        allow_any_instance_of(described_class).to receive(:install_change_state!).and_return(true)
+        allow_any_instance_of(described_class).to receive(:linked?).and_return(false)
+        allow_any_instance_of(described_class).to receive(:keg_only?).and_return(false)
+      end
+
+      it "links formula" do
+        expect(Bundle).to receive(:system).with(HOMEBREW_BREW_FILE, "link", "mysql",
+                                                verbose: false).and_return(true)
+        described_class.preinstall(formula, link: nil)
+        described_class.install(formula, link: nil)
+      end
+    end
+
+    context "when the link option is nil and formula is linked and keg-only" do
+      before do
+        allow_any_instance_of(described_class).to receive(:install_change_state!).and_return(true)
+        allow_any_instance_of(described_class).to receive(:linked?).and_return(true)
+        allow_any_instance_of(described_class).to receive(:keg_only?).and_return(true)
+      end
+
+      it "unlinks formula" do
+        expect(Bundle).to receive(:system).with(HOMEBREW_BREW_FILE, "unlink", "mysql",
+                                                verbose: false).and_return(true)
+        described_class.preinstall(formula, link: nil)
+
+        described_class.install(formula, link: nil)
+      end
+    end
+
+    context "when the conflicts_with option is provided" do
+      before do
+        allow(Bundle::BrewDumper).to receive(:formulae_by_full_name).and_return(
+          name:           "mysql",
+          conflicts_with: ["mysql55"],
+        )
+        allow(described_class).to receive(:formula_installed?).and_return(true)
+        allow_any_instance_of(described_class).to receive(:install!).and_return(true)
+        allow_any_instance_of(described_class).to receive(:upgrade!).and_return(true)
+      end
+
+      it "unlinks conflicts and stops their services" do
+        verbose = false
+        expect(Bundle).to receive(:system).with(HOMEBREW_BREW_FILE, "unlink", "mysql55",
+                                                verbose:).and_return(true)
+        expect(Bundle).to receive(:system).with(HOMEBREW_BREW_FILE, "unlink", "mysql56",
+                                                verbose:).and_return(true)
+        expect(Bundle::BrewServices).to receive(:stop).with("mysql55", verbose:).and_return(true)
+        expect(Bundle::BrewServices).to receive(:stop).with("mysql56", verbose:).and_return(true)
+        expect(Bundle::BrewServices).to receive(:restart).with(formula, verbose:).and_return(true)
+        described_class.preinstall(formula, restart_service: :always, conflicts_with: ["mysql56"])
+        described_class.install(formula, restart_service: :always, conflicts_with: ["mysql56"])
+      end
+
+      it "prints a message" do
+        allow_any_instance_of(described_class).to receive(:puts)
+        verbose = true
+        expect(Bundle).to receive(:system).with(HOMEBREW_BREW_FILE, "unlink", "mysql55",
+                                                verbose:).and_return(true)
+        expect(Bundle).to receive(:system).with(HOMEBREW_BREW_FILE, "unlink", "mysql56",
+                                                verbose:).and_return(true)
+        expect(Bundle::BrewServices).to receive(:stop).with("mysql55", verbose:).and_return(true)
+        expect(Bundle::BrewServices).to receive(:stop).with("mysql56", verbose:).and_return(true)
+        expect(Bundle::BrewServices).to receive(:restart).with(formula, verbose:).and_return(true)
+        described_class.preinstall(formula, restart_service: :always, conflicts_with: ["mysql56"], verbose: true)
+        described_class.install(formula, restart_service: :always, conflicts_with: ["mysql56"], verbose: true)
+      end
+    end
+
+    context "when the postinstall option is provided" do
+      before do
+        allow_any_instance_of(described_class).to receive(:install_change_state!).and_return(true)
+        allow_any_instance_of(described_class).to receive(:installed?).and_return(true)
+      end
+
+      context "when formula has changed" do
+        before do
+          allow_any_instance_of(described_class).to receive(:changed?).and_return(true)
+        end
+
+        it "runs the postinstall command" do
+          expect(Kernel).to receive(:system).with("custom command").and_return(true)
+          described_class.preinstall(formula, postinstall: "custom command")
+          described_class.install(formula, postinstall: "custom command")
+        end
+
+        it "reports a failure" do
+          expect(Kernel).to receive(:system).with("custom command").and_return(false)
+          described_class.preinstall(formula, postinstall: "custom command")
+          expect(described_class.install(formula, postinstall: "custom command")).to be(false)
+        end
+      end
+
+      context "when formula has not changed" do
+        before do
+          allow_any_instance_of(described_class).to receive(:changed?).and_return(false)
+        end
+
+        it "does not run the postinstall command" do
+          expect(Kernel).not_to receive(:system)
+          described_class.preinstall(formula, postinstall: "custom command")
+          described_class.install(formula, postinstall: "custom command")
+        end
       end
     end
   end
 
-  context "when the link option is true" do
+  context "when a formula isn't installed" do
     before do
-      allow_any_instance_of(described_class).to receive(:install_change_state!).and_return(:success)
+      allow_any_instance_of(described_class).to receive(:installed?).and_return(false)
+      allow_any_instance_of(described_class).to receive(:install_change_state!).and_return(false)
     end
 
-    it "links formula" do
-      expect(Bundle).to receive(:system).with("brew", "link", "--force", "mysql", verbose: false).and_return(true)
-      described_class.install(formula, link: true)
-    end
-  end
-
-  context "when the link option is false" do
-    before do
-      allow_any_instance_of(described_class).to receive(:install_change_state!).and_return(:success)
-    end
-
-    it "unlinks formula" do
-      expect(Bundle).to receive(:system).with("brew", "unlink", "mysql", verbose: false).and_return(true)
-      described_class.install(formula, link: false)
-    end
-  end
-
-  context "when the link option is nil and formula is unlinked and not keg-only" do
-    before do
-      allow_any_instance_of(described_class).to receive(:install_change_state!).and_return(:success)
-    end
-
-    it "links formula" do
-      allow_any_instance_of(described_class).to receive(:unlinked_and_not_keg_only?).and_return(true)
-      expect(Bundle).to receive(:system).with("brew", "link", "mysql", verbose: false).and_return(true)
-      described_class.install(formula, link: nil)
-    end
-  end
-
-  context "when the link option is nil and formula is linked and keg-only" do
-    before do
-      allow_any_instance_of(described_class).to receive(:install_change_state!).and_return(:success)
-    end
-
-    it "unlinks formula" do
-      allow_any_instance_of(described_class).to receive(:linked_and_keg_only?).and_return(true)
-      expect(Bundle).to receive(:system).with("brew", "unlink", "mysql", verbose: false).and_return(true)
-      described_class.install(formula, link: nil)
-    end
-  end
-
-  context "when the conflicts_with option is provided" do
-    before do
-      allow(Bundle::BrewDumper).to receive(:formulae_by_full_name).and_return(
-        name:           "mysql",
-        conflicts_with: ["mysql55"],
-      )
-      allow(described_class).to receive(:formula_installed?).and_return(true)
-      allow_any_instance_of(described_class).to receive(:install).and_return(true)
-    end
-
-    def sane?(verbose:)
-      expect(Bundle).to receive(:system).with("brew", "unlink", "mysql55", verbose: verbose).and_return(true)
-      expect(Bundle).to receive(:system).with("brew", "unlink", "mysql56", verbose: verbose).and_return(true)
-      expect(Bundle::BrewServices).to receive(:stop).with("mysql55", verbose: verbose).and_return(true)
-      expect(Bundle::BrewServices).to receive(:stop).with("mysql56", verbose: verbose).and_return(true)
-      expect(Bundle::BrewServices).to receive(:restart).with(formula, verbose: verbose).and_return(true)
-    end
-
-    it "unlinks conflicts and stops their services" do
-      sane?(verbose: false)
-      described_class.install(formula, restart_service: true, conflicts_with: ["mysql56"])
-    end
-
-    it "prints a message" do
-      allow_any_instance_of(described_class).to receive(:puts)
-      sane?(verbose: true)
-      described_class.install(formula, restart_service: true, conflicts_with: ["mysql56"], verbose: true)
+    it "did not call restart service" do
+      expect(Bundle::BrewServices).not_to receive(:restart)
+      described_class.preinstall(formula, restart_service: true)
     end
   end
 
@@ -185,16 +328,18 @@ describe Bundle::BrewInstaller do
 
       it "install formula" do
         expect(Bundle).to receive(:system)
-          .with("brew", "install", "--formula", formula, "--with-option", verbose: false)
+          .with(HOMEBREW_BREW_FILE, "install", "--formula", formula, "--with-option", verbose: false)
           .and_return(true)
-        expect(do_install).to be(:success)
+        expect(installer.preinstall).to be(true)
+        expect(installer.install).to be(true)
       end
 
       it "reports a failure" do
         expect(Bundle).to receive(:system)
-          .with("brew", "install", "--formula", formula, "--with-option", verbose: false)
+          .with(HOMEBREW_BREW_FILE, "install", "--formula", formula, "--with-option", verbose: false)
           .and_return(false)
-        expect(do_install).to be(:failed)
+        expect(installer.preinstall).to be(true)
+        expect(installer.install).to be(false)
       end
     end
 
@@ -211,15 +356,17 @@ describe Bundle::BrewInstaller do
         end
 
         it "upgrade formula" do
-          expect(Bundle).to receive(:system).with("brew", "upgrade", "--formula", formula, verbose: false)
+          expect(Bundle).to receive(:system).with(HOMEBREW_BREW_FILE, "upgrade", "--formula", formula, verbose: false)
                                             .and_return(true)
-          expect(do_install).to be(:success)
+          expect(installer.preinstall).to be(true)
+          expect(installer.install).to be(true)
         end
 
         it "reports a failure" do
-          expect(Bundle).to receive(:system).with("brew", "upgrade", "--formula", formula, verbose: false)
+          expect(Bundle).to receive(:system).with(HOMEBREW_BREW_FILE, "upgrade", "--formula", formula, verbose: false)
                                             .and_return(false)
-          expect(do_install).to be(:failed)
+          expect(installer.preinstall).to be(true)
+          expect(installer.install).to be(false)
         end
 
         context "when formula pinned" do
@@ -228,8 +375,9 @@ describe Bundle::BrewInstaller do
           end
 
           it "does not upgrade formula" do
-            expect(Bundle).not_to receive(:system).with("brew", "upgrade", "--formula", formula, verbose: false)
-            expect(do_install).to be(:skipped)
+            expect(Bundle).not_to receive(:system).with(HOMEBREW_BREW_FILE, "upgrade", "--formula", formula,
+                                                        verbose: false)
+            expect(installer.preinstall).to be(false)
           end
         end
 
@@ -240,7 +388,7 @@ describe Bundle::BrewInstaller do
 
           it "does not upgrade formula" do
             expect(Bundle).not_to receive(:system)
-            expect(do_install).to be(:skipped)
+            expect(installer.preinstall).to be(false)
           end
         end
       end
@@ -265,6 +413,60 @@ describe Bundle::BrewInstaller do
     end
   end
 
+  describe "#start_service_needed?" do
+    context "when a service is already started" do
+      before do
+        allow(Bundle::BrewServices).to receive(:started?).with(formula).and_return(true)
+      end
+
+      it "is false by default" do
+        expect(described_class.new(formula).start_service_needed?).to be(false)
+      end
+
+      it "is false with {start_service: true}" do
+        expect(described_class.new(formula, start_service: true).start_service_needed?).to be(false)
+      end
+
+      it "is false with {restart_service: true}" do
+        expect(described_class.new(formula, restart_service: true).start_service_needed?).to be(false)
+      end
+
+      it "is false with {restart_service: :changed}" do
+        expect(described_class.new(formula, restart_service: :changed).start_service_needed?).to be(false)
+      end
+
+      it "is false with {restart_service: :always}" do
+        expect(described_class.new(formula, restart_service: :always).start_service_needed?).to be(false)
+      end
+    end
+
+    context "when a service is not started" do
+      before do
+        allow(Bundle::BrewServices).to receive(:started?).with(formula).and_return(false)
+      end
+
+      it "is false by default" do
+        expect(described_class.new(formula).start_service_needed?).to be(false)
+      end
+
+      it "is true if {start_service: true}" do
+        expect(described_class.new(formula, start_service: true).start_service_needed?).to be(true)
+      end
+
+      it "is true if {restart_service: true}" do
+        expect(described_class.new(formula, restart_service: true).start_service_needed?).to be(true)
+      end
+
+      it "is true if {restart_service: :changed}" do
+        expect(described_class.new(formula, restart_service: :changed).start_service_needed?).to be(true)
+      end
+
+      it "is true if {restart_service: :always}" do
+        expect(described_class.new(formula, restart_service: :always).start_service_needed?).to be(true)
+      end
+    end
+  end
+
   describe "#restart_service?" do
     it "is false by default" do
       expect(described_class.new(formula).restart_service?).to be(false)
@@ -273,6 +475,12 @@ describe Bundle::BrewInstaller do
     context "when the restart_service option is true" do
       it "is true" do
         expect(described_class.new(formula, restart_service: true).restart_service?).to be(true)
+      end
+    end
+
+    context "when the restart_service option is always" do
+      it "is true" do
+        expect(described_class.new(formula, restart_service: :always).restart_service?).to be(true)
       end
     end
 
@@ -293,8 +501,12 @@ describe Bundle::BrewInstaller do
         allow_any_instance_of(described_class).to receive(:changed?).and_return(false)
       end
 
-      it "is true with {restart_service: true}" do
-        expect(described_class.new(formula, restart_service: true).restart_service_needed?).to be(true)
+      it "is false with {restart_service: true}" do
+        expect(described_class.new(formula, restart_service: true).restart_service_needed?).to be(false)
+      end
+
+      it "is true with {restart_service: :always}" do
+        expect(described_class.new(formula, restart_service: :always).restart_service_needed?).to be(true)
       end
 
       it "is false if {restart_service: :changed}" do
@@ -309,6 +521,10 @@ describe Bundle::BrewInstaller do
 
       it "is true with {restart_service: true}" do
         expect(described_class.new(formula, restart_service: true).restart_service_needed?).to be(true)
+      end
+
+      it "is true with {restart_service: :always}" do
+        expect(described_class.new(formula, restart_service: :always).restart_service_needed?).to be(true)
       end
 
       it "is true if {restart_service: :changed}" do

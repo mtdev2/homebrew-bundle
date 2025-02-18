@@ -2,9 +2,12 @@
 
 source "https://rubygems.org"
 
+ruby file: ".ruby-version"
+
 group :test do
   gem "activesupport"
-  gem "codecov", require: false
   gem "rspec"
-  gem "simplecov"
+  gem "simplecov", require: false
+  gem "simplecov-cobertura", require: false
+  gem "sorbet-runtime"
 end

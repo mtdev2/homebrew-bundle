@@ -1,3 +1,4 @@
+# typed: true
 # frozen_string_literal: true
 
 module Bundle
@@ -8,8 +9,12 @@ module Bundle
       @pinned_formulae = nil
     end
 
-    def self.install(name, no_upgrade: false, verbose: false, **options)
-      new(name, options).run(no_upgrade: no_upgrade, verbose: verbose)
+    def self.preinstall(name, no_upgrade: false, verbose: false, **options)
+      new(name, options).preinstall(no_upgrade:, verbose:)
+    end
+
+    def self.install(name, preinstall: true, no_upgrade: false, verbose: false, force: false, **options)
+      new(name, options).install(preinstall:, no_upgrade:, verbose:, force:)
     end
 
     def initialize(name, options = {})
@@ -18,79 +23,125 @@ module Bundle
       @args = options.fetch(:args, []).map { |arg| "--#{arg}" }
       @conflicts_with_arg = options.fetch(:conflicts_with, [])
       @restart_service = options[:restart_service]
-      @start_service = options[:start_service]
+      @start_service = options.fetch(:start_service, @restart_service)
       @link = options.fetch(:link, nil)
+      @postinstall = options.fetch(:postinstall, nil)
       @changed = nil
     end
 
-    def run(no_upgrade: false, verbose: false)
-      install_result = install_change_state!(no_upgrade: no_upgrade, verbose: verbose)
-      service_change_state!(verbose: verbose) if install_result != :failed
-      link_change_state!(verbose: verbose)
-      install_result
+    def preinstall(no_upgrade: false, verbose: false)
+      if installed? && (no_upgrade || !upgradable?)
+        puts "Skipping install of #{@name} formula. It is already installed." if verbose
+        @changed = nil
+        return false
+      end
+
+      true
     end
 
-    def install_change_state!(no_upgrade:, verbose:)
-      return :failed unless resolve_conflicts!(verbose: verbose)
+    def install(preinstall: true, no_upgrade: false, verbose: false, force: false)
+      install_result = if preinstall
+        install_change_state!(no_upgrade:, verbose:, force:)
+      else
+        true
+      end
+      result = install_result
 
       if installed?
-        return :skipped if no_upgrade
+        service_result = service_change_state!(verbose:)
+        result &&= service_result
 
-        upgrade!(verbose: verbose)
+        link_result = link_change_state!(verbose:)
+        result &&= link_result
+
+        postinstall_result = postinstall_change_state!(verbose:)
+        result &&= postinstall_result
+      end
+
+      result
+    end
+
+    def install_change_state!(no_upgrade:, verbose:, force:)
+      return false unless resolve_conflicts!(verbose:)
+
+      if installed?
+        upgrade!(verbose:, force:)
       else
-        install!(verbose: verbose)
+        install!(verbose:, force:)
       end
     end
 
     def start_service?
-      !@start_service.nil?
+      @start_service.present?
+    end
+
+    def start_service_needed?
+      start_service? && !BrewServices.started?(@full_name)
     end
 
     def restart_service?
-      !@restart_service.nil?
+      @restart_service.present?
     end
 
     def restart_service_needed?
       return false unless restart_service?
 
       # Restart if `restart_service: :always`, or if the formula was installed or upgraded
-      @restart_service.to_s != "changed" || changed?
+      @restart_service.to_s == "always" || changed?
     end
 
     def changed?
-      !@changed.nil?
+      @changed.present?
     end
 
     def service_change_state!(verbose:)
       if restart_service_needed?
         puts "Restarting #{@name} service." if verbose
-        BrewServices.restart(@full_name, verbose: verbose)
+        BrewServices.restart(@full_name, verbose:)
+      elsif start_service_needed?
+        puts "Starting #{@name} service." if verbose
+        BrewServices.start(@full_name, verbose:)
       else
         true
       end
     end
 
     def link_change_state!(verbose: false)
-      case @link
+      link_args = []
+      link_args << "--force" if unlinked_and_keg_only?
+
+      cmd = case @link
+      when :overwrite
+        link_args << "--overwrite"
+        "link" unless linked?
       when true
-        unless linked_and_keg_only?
-          puts "Force-linking #{@name} formula." if verbose
-          Bundle.system("brew", "link", "--force", @name, verbose: verbose)
-        end
+        "link" unless linked?
       when false
-        unless unlinked_and_not_keg_only?
-          puts "Unlinking #{@name} formula." if verbose
-          Bundle.system("brew", "unlink", @name, verbose: verbose)
-        end
+        "unlink" if linked?
       when nil
-        if unlinked_and_not_keg_only?
-          puts "Linking #{@name} formula." if verbose
-          Bundle.system("brew", "link", @name, verbose: verbose)
-        elsif linked_and_keg_only?
-          puts "Unlinking #{@name} formula." if verbose
-          Bundle.system("brew", "unlink", @name, verbose: verbose)
+        if keg_only?
+          "unlink" if linked?
+        else
+          "link" unless linked?
         end
       end
+
+      if cmd.present?
+        verb = "#{cmd}ing".capitalize
+        with_args = " with #{link_args.join(" ")}" if link_args.present?
+        puts "#{verb} #{@name} formula#{with_args}." if verbose
+        return Bundle.brew(cmd, *link_args, @name, verbose:)
+      end
+
+      true
+    end
+
+    def postinstall_change_state!(verbose:)
+      return true if @postinstall.blank?
+      return true unless changed?
+
+      puts "Running postinstall for #{@name}: #{@postinstall}" if verbose
+      Kernel.system(@postinstall)
     end
 
     def self.formula_installed_and_up_to_date?(formula, no_upgrade: false)
@@ -121,21 +172,13 @@ module Bundle
       formula_in_array?(formula, installed_formulae)
     end
 
-    def self.formula_linked_and_keg_only?(formula)
-      formula_in_array?(formula, linked_and_keg_only_formulae)
-    end
-
-    def self.formula_unlinked_and_not_keg_only?(formula)
-      formula_in_array?(formula, unlinked_and_not_keg_only_formulae)
-    end
-
     def self.formula_upgradable?(formula)
-      # Check local cache first and then authoratitive Homebrew source.
+      # Check local cache first and then authoritative Homebrew source.
       formula_in_array?(formula, upgradable_formulae) && Formula[formula].outdated?
     end
 
     def self.installed_formulae
-      @installed_formulae ||= Bundle::BrewDumper.formulae.map { |f| f[:name] }
+      @installed_formulae ||= formulae.map { |f| f[:name] }
     end
 
     def self.upgradable_formulae
@@ -143,19 +186,11 @@ module Bundle
     end
 
     def self.outdated_formulae
-      @outdated_formulae ||= formulae.map { |f| f[:name] if f[:outdated?] }.compact
+      @outdated_formulae ||= formulae.filter_map { |f| f[:name] if f[:outdated?] }
     end
 
     def self.pinned_formulae
-      @pinned_formulae ||= formulae.map { |f| f[:name] if f[:pinned?] }.compact
-    end
-
-    def self.linked_and_keg_only_formulae
-      @linked_and_keg_only_formulae ||= formulae.map { |f| f[:name] if f[:link?] == true }.compact
-    end
-
-    def self.unlinked_and_not_keg_only_formulae
-      @unlinked_and_not_keg_only_formulae ||= formulae.map { |f| f[:name] if f[:link?] == false }.compact
+      @pinned_formulae ||= formulae.filter_map { |f| f[:name] if f[:pinned?] }
     end
 
     def self.formulae
@@ -168,12 +203,16 @@ module Bundle
       BrewInstaller.formula_installed?(@name)
     end
 
-    def linked_and_keg_only?
-      BrewInstaller.formula_linked_and_keg_only?(@name)
+    def linked?
+      Formula[@full_name].linked?
     end
 
-    def unlinked_and_not_keg_only?
-      BrewInstaller.formula_unlinked_and_not_keg_only?(@name)
+    def keg_only?
+      Formula[@full_name].keg_only?
+    end
+
+    def unlinked_and_keg_only?
+      !linked? && keg_only?
     end
 
     def upgradable?
@@ -204,44 +243,45 @@ module Bundle
             It is currently installed and conflicts with #{@name}.
           EOS
         end
-        return false unless Bundle.system("brew", "unlink", conflict, verbose: verbose)
+        return false unless Bundle.brew("unlink", conflict, verbose:)
 
-        if @restart_service
+        if restart_service?
           puts "Stopping #{conflict} service (if it is running)." if verbose
-          BrewServices.stop(conflict, verbose: verbose)
+          BrewServices.stop(conflict, verbose:)
         end
       end
 
       true
     end
 
-    def install!(verbose:)
-      puts "Installing #{@name} formula. It is not currently installed." if verbose
-      unless Bundle.system("brew", "install", "--formula", @full_name, *@args, verbose: verbose)
+    def install!(verbose:, force:)
+      install_args = @args.dup
+      install_args << "--force" << "--overwrite" if force
+      install_args << "--skip-link" if @link == false
+      with_args = " with #{install_args.join(" ")}" if install_args.present?
+      puts "Installing #{@name} formula#{with_args}. It is not currently installed." if verbose
+      unless Bundle.brew("install", "--formula", @full_name, *install_args, verbose:)
         @changed = nil
-        return :failed
+        return false
       end
 
       BrewInstaller.installed_formulae << @name
       @changed = true
-      :success
+      true
     end
 
-    def upgrade!(verbose:)
-      unless upgradable?
-        puts "Skipping install of #{@name} formula. It is already up-to-date." if verbose
+    def upgrade!(verbose:, force:)
+      upgrade_args = []
+      upgrade_args << "--force" if force
+      with_args = " with #{upgrade_args.join(" ")}" if upgrade_args.present?
+      puts "Upgrading #{@name} formula#{with_args}. It is installed but not up-to-date." if verbose
+      unless Bundle.brew("upgrade", "--formula", @name, *upgrade_args, verbose:)
         @changed = nil
-        return :skipped
-      end
-
-      puts "Upgrading #{@name} formula. It is installed but not up-to-date." if verbose
-      unless Bundle.system("brew", "upgrade", "--formula", @name, verbose: verbose)
-        @changed = nil
-        return :failed
+        return false
       end
 
       @changed = true
-      :success
+      true
     end
   end
 end

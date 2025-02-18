@@ -1,3 +1,4 @@
+# typed: true
 # frozen_string_literal: true
 
 module Bundle
@@ -12,8 +13,8 @@ module Bundle
         output_errors = verbose
         exit_on_first_error = !verbose
         check_result = Bundle::Checker.check(
-          global: global, file: file,
-          exit_on_first_error: exit_on_first_error, no_upgrade: no_upgrade, verbose: verbose
+          global:, file:,
+          exit_on_first_error:, no_upgrade:, verbose:
         )
 
         if check_result.work_to_be_done

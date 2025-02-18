@@ -1,3 +1,4 @@
+# typed: true
 # frozen_string_literal: true
 
 module Bundle
@@ -5,12 +6,16 @@ module Bundle
     module Install
       module_function
 
-      def run(global: false, file: nil, no_lock: false, no_upgrade: false, verbose: false)
-        parsed_entries = Bundle::Dsl.new(Brewfile.read(global: global, file: file)).entries
+      def run(global: false, file: nil, no_lock: false, no_upgrade: false, verbose: false, force: false, quiet: false)
+        @dsl = Brewfile.read(global:, file:)
         Bundle::Installer.install(
-          parsed_entries,
-          global: global, file: file, no_lock: no_lock, no_upgrade: no_upgrade, verbose: verbose,
+          @dsl.entries,
+          global:, file:, no_lock:, no_upgrade:, verbose:, force:, quiet:,
         ) || exit(1)
+      end
+
+      def dsl
+        @dsl
       end
     end
   end

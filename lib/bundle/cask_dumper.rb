@@ -1,3 +1,4 @@
+# typed: true
 # frozen_string_literal: true
 
 module Bundle
@@ -14,25 +15,26 @@ module Bundle
       @cask_names ||= casks.map(&:to_s)
     end
 
-    def outdated_cask_names(greedy: false)
+    def outdated_cask_names
       return [] unless Bundle.cask_installed?
 
-      casks.select { |c| c.outdated?(greedy: greedy) }
+      casks.select { |c| c.outdated?(greedy: false) }
            .map(&:to_s)
     end
 
-    def cask_versions
-      return {} unless Bundle.cask_installed?
+    def cask_is_outdated_using_greedy?(cask_name)
+      return false unless Bundle.cask_installed?
 
-      casks.each_with_object({}) do |cask, name_versions|
-        name_versions[cask.to_s] = cask.version
-      end
+      cask = casks.find { |c| c.to_s == cask_name }
+      return false if cask.nil?
+
+      cask.outdated?(greedy: true)
     end
 
     def dump(describe: false)
       casks.map do |cask|
         description = "# #{cask.desc}\n" if describe && cask.desc.present?
-        config = ", args: { #{cask.config.explicit_s} }" if cask.config.present? && cask.config.explicit.present?
+        config = ", args: { #{explicit_s(cask.config)} }" if cask.config.present? && cask.config.explicit.present?
         "#{description}cask \"#{cask}\"#{config}"
       end.join("\n")
     end
@@ -55,5 +57,16 @@ module Bundle
       @casks ||= Cask::Caskroom.casks
     end
     private_class_method :casks
+
+    def explicit_s(cask_config)
+      cask_config.explicit.map do |key, value|
+        # inverse of #env - converts :languages config key back to --language flag
+        if key == :languages
+          key = "language"
+          value = cask_config.explicit.fetch(:languages, []).join(",")
+        end
+        "#{key}: \"#{value.to_s.sub(/^#{Dir.home}/, "~")}\""
+      end.join(", ")
+    end
   end
 end

@@ -1,3 +1,4 @@
+# typed: true
 # frozen_string_literal: true
 
 $LOAD_PATH.unshift(File.dirname(__FILE__))
@@ -24,7 +25,6 @@ require "bundle/tap_checker"
 require "bundle/dumper"
 require "bundle/installer"
 require "bundle/lister"
-require "bundle/locker"
 require "bundle/commands/install"
 require "bundle/commands/dump"
 require "bundle/commands/cleanup"
@@ -33,3 +33,6 @@ require "bundle/commands/exec"
 require "bundle/commands/list"
 require "bundle/whalebrew_installer"
 require "bundle/whalebrew_dumper"
+require "bundle/vscode_extension_checker"
+require "bundle/vscode_extension_dumper"
+require "bundle/vscode_extension_installer"

@@ -3,29 +3,21 @@
 require "spec_helper"
 
 describe Bundle::CaskInstaller do
-  def do_install
-    Bundle::CaskInstaller.install("google-chrome")
-  end
-
-  def do_greedy_install
-    Bundle::CaskInstaller.install("opera", greedy: true)
-  end
-
   describe ".installed_casks" do
     before do
       Bundle::CaskDumper.reset!
     end
 
     it "shells out" do
-      described_class.installed_casks
+      expect { described_class.installed_casks }.not_to raise_error
     end
   end
 
   describe ".cask_installed_and_up_to_date?" do
     it "returns result" do
       described_class.reset!
-      allow(described_class).to receive(:installed_casks).and_return(["foo", "baz"])
-      allow(described_class).to receive(:outdated_casks).and_return(["baz"])
+      allow(described_class).to receive_messages(installed_casks: ["foo", "baz"],
+                                                 outdated_casks:  ["baz"])
       expect(described_class.cask_installed_and_up_to_date?("foo")).to be(true)
       expect(described_class.cask_installed_and_up_to_date?("baz")).to be(false)
     end
@@ -61,34 +53,36 @@ describe Bundle::CaskInstaller do
 
       it "skips" do
         expect(Bundle).not_to receive(:system)
-        expect(do_install).to be(:skipped)
+        expect(described_class.preinstall("google-chrome")).to be(false)
       end
     end
 
     context "when cask is outdated" do
       before do
-        allow(described_class).to receive(:installed_casks).and_return(["google-chrome"])
-        allow(described_class).to receive(:outdated_casks).and_return(["google-chrome"])
+        allow(described_class).to receive_messages(installed_casks: ["google-chrome"],
+                                                   outdated_casks:  ["google-chrome"])
       end
 
       it "upgrades" do
-        expect(Bundle).to receive(:system).with("brew", "upgrade", "--cask", "google-chrome", verbose: false)
+        expect(Bundle).to receive(:system).with(HOMEBREW_BREW_FILE, "upgrade", "--cask", "google-chrome",
+                                                verbose: false)
                                           .and_return(true)
-        expect(do_install).to be(:success)
+        expect(described_class.preinstall("google-chrome")).to be(true)
+        expect(described_class.install("google-chrome")).to be(true)
       end
     end
 
     context "when cask is outdated and uses auto-update" do
       before do
-        allow(described_class).to receive(:installed_casks).and_return(["opera"])
-        allow(described_class).to receive(:outdated_casks).and_return([])
-        allow(described_class).to receive(:all_outdated_casks).and_return(["opera"])
+        allow(Bundle::CaskDumper).to receive_messages(cask_names: ["opera"], outdated_cask_names: [])
+        allow(Bundle::CaskDumper).to receive(:cask_is_outdated_using_greedy?).with("opera").and_return(true)
       end
 
       it "upgrades" do
-        expect(Bundle).to receive(:system).with("brew", "upgrade", "--cask", "opera", verbose: false)
+        expect(Bundle).to receive(:system).with(HOMEBREW_BREW_FILE, "upgrade", "--cask", "opera", verbose: false)
                                           .and_return(true)
-        expect(do_greedy_install).to be(:success)
+        expect(described_class.preinstall("opera", greedy: true)).to be(true)
+        expect(described_class.install("opera", greedy: true)).to be(true)
       end
     end
 
@@ -98,36 +92,68 @@ describe Bundle::CaskInstaller do
       end
 
       it "installs cask" do
-        expect(Bundle).to receive(:system).with("brew", "install", "--cask", "google-chrome", verbose: false)
-                                          .and_return(true)
-        expect(do_install).to be(:success)
+        expect(Bundle).to receive(:brew).with("install", "--cask", "google-chrome", "--adopt",
+                                              verbose: false)
+                                        .and_return(true)
+        expect(described_class.preinstall("google-chrome")).to be(true)
+        expect(described_class.install("google-chrome")).to be(true)
       end
 
       it "installs cask with arguments" do
-        expect(Bundle).to \
-          receive(:system).with("brew", "install", "--cask", "firefox", "--appdir=/Applications", verbose: false)
-                          .and_return(true)
-        expect(described_class.install("firefox", args: { appdir: "/Applications" })).to eq(:success)
+        expect(Bundle).to(
+          receive(:brew).with("install", "--cask", "firefox", "--appdir=/Applications", "--adopt",
+                              verbose: false)
+                          .and_return(true),
+        )
+        expect(described_class.preinstall("firefox", args: { appdir: "/Applications" })).to be(true)
+        expect(described_class.install("firefox", args: { appdir: "/Applications" })).to be(true)
       end
 
       it "reports a failure" do
-        expect(Bundle).to receive(:system).with("brew", "install", "--cask", "google-chrome", verbose: false)
-                                          .and_return(false)
-        expect(do_install).to be(:failed)
+        expect(Bundle).to receive(:brew).with("install", "--cask", "google-chrome", "--adopt",
+                                              verbose: false)
+                                        .and_return(false)
+        expect(described_class.preinstall("google-chrome")).to be(true)
+        expect(described_class.install("google-chrome")).to be(false)
       end
 
       context "with boolean arguments" do
         it "includes a flag if true" do
-          expect(Bundle).to receive(:system).with("brew", "install", "--cask", "iterm", "--force", verbose: false)
-                                            .and_return(true)
-          expect(described_class.install("iterm", args: { force: true })).to eq(:success)
+          expect(Bundle).to receive(:brew).with("install", "--cask", "iterm", "--force",
+                                                verbose: false)
+                                          .and_return(true)
+          expect(described_class.preinstall("iterm", args: { force: true })).to be(true)
+          expect(described_class.install("iterm", args: { force: true })).to be(true)
         end
 
         it "does not include a flag if false" do
-          expect(Bundle).to receive(:system).with("brew", "install", "--cask", "iterm", verbose: false)
-                                            .and_return(true)
-          expect(described_class.install("iterm", args: { force: false })).to eq(:success)
+          expect(Bundle).to receive(:brew).with("install", "--cask", "iterm", "--adopt", verbose: false)
+                                          .and_return(true)
+          expect(described_class.preinstall("iterm", args: { force: false })).to be(true)
+          expect(described_class.install("iterm", args: { force: false })).to be(true)
         end
+      end
+    end
+
+    context "when the postinstall option is provided" do
+      before do
+        Bundle::CaskDumper.reset!
+        allow(Bundle::CaskDumper).to receive_messages(cask_names:          ["google-chrome"],
+                                                      outdated_cask_names: ["google-chrome"])
+        allow(Bundle).to receive(:brew).and_return(true)
+        allow(described_class).to receive(:upgrading?).and_return(true)
+      end
+
+      it "runs the postinstall command" do
+        expect(Kernel).to receive(:system).with("custom command").and_return(true)
+        expect(described_class.preinstall("google-chrome", postinstall: "custom command")).to be(true)
+        expect(described_class.install("google-chrome", postinstall: "custom command")).to be(true)
+      end
+
+      it "reports a failure when postinstall fails" do
+        expect(Kernel).to receive(:system).with("custom command").and_return(false)
+        expect(described_class.preinstall("google-chrome", postinstall: "custom command")).to be(true)
+        expect(described_class.install("google-chrome", postinstall: "custom command")).to be(false)
       end
     end
   end

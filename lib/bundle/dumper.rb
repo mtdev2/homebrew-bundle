@@ -1,3 +1,4 @@
+# typed: true
 # frozen_string_literal: true
 
 require "fileutils"
@@ -13,25 +14,27 @@ module Bundle
       true
     end
 
-    def build_brewfile(describe: false, no_restart: false)
+    def build_brewfile(describe:, no_restart:, brews:, taps:, casks:, mas:, whalebrew:, vscode:)
       content = []
-      content << TapDumper.dump
-      content << BrewDumper.dump(describe: describe, no_restart: no_restart)
-      content << CaskDumper.dump(describe: describe)
-      content << MacAppStoreDumper.dump
-      content << WhalebrewDumper.dump
+      content << TapDumper.dump if taps
+      content << BrewDumper.dump(describe:, no_restart:) if brews
+      content << CaskDumper.dump(describe:) if casks
+      content << MacAppStoreDumper.dump if mas
+      content << WhalebrewDumper.dump if whalebrew
+      content << VscodeExtensionDumper.dump if vscode
       "#{content.reject(&:empty?).join("\n")}\n"
     end
 
-    def dump_brewfile(global: false, file: nil, describe: false, force: false, no_restart: false)
-      path = brewfile_path(global: global, file: file)
-      can_write_to_brewfile?(path, force: force)
-      content = build_brewfile(describe: describe, no_restart: no_restart)
+    def dump_brewfile(global:, file:, describe:, force:, no_restart:, brews:, taps:, casks:, mas:, whalebrew:,
+                      vscode:)
+      path = brewfile_path(global:, file:)
+      can_write_to_brewfile?(path, force:)
+      content = build_brewfile(describe:, no_restart:, taps:, brews:, casks:, mas:, whalebrew:, vscode:)
       write_file path, content
     end
 
     def brewfile_path(global: false, file: nil)
-      Brewfile.path(dash_writes_to_stdout: true, global: global, file: file)
+      Brewfile.path(dash_writes_to_stdout: true, global:, file:)
     end
 
     def should_not_write_file?(file, overwrite: false)
@@ -39,7 +42,9 @@ module Bundle
     end
 
     def write_file(file, content)
-      file.open("w") { |io| io.write content }
+      Bundle.exchange_uid_if_needed! do
+        file.open("w") { |io| io.write content }
+      end
     end
   end
 end

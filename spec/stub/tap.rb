@@ -1,7 +1,9 @@
 # frozen_string_literal: true
 
+require "ostruct"
+
 class Tap
-  def self.each
+  def self.select(*)
     []
   end
 

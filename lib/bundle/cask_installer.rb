@@ -1,3 +1,4 @@
+# typed: true
 # frozen_string_literal: true
 
 module Bundle
@@ -7,41 +8,76 @@ module Bundle
     def reset!
       @installed_casks = nil
       @outdated_casks = nil
-      @all_outdated_casks = nil
     end
 
-    def install(name, no_upgrade: false, verbose: false, **options)
-      full_name = options.fetch(:full_name, name)
-      greedy = options[:greedy]
+    def upgrading?(no_upgrade, name, options)
+      return false if no_upgrade
+      return true if outdated_casks.include?(name)
+      return false unless options[:greedy]
 
-      if installed_casks.include? name
-        if !no_upgrade && (outdated_casks.include?(name) || all_outdated_casks.include?(name) && greedy)
-          status = "#{greedy ? "may not be" : "not"} up-to-date"
-          puts "Upgrading #{name} cask. It is installed but #{status}." if verbose
-          return :failed unless Bundle.system "brew", "upgrade", "--cask", full_name, verbose: verbose
+      Bundle::CaskDumper.cask_is_outdated_using_greedy?(name)
+    end
 
-          return :success
-        end
-        return :skipped
+    def preinstall(name, no_upgrade: false, verbose: false, **options)
+      if installed_casks.include?(name) && !upgrading?(no_upgrade, name, options)
+        puts "Skipping install of #{name} cask. It is already installed." if verbose
+        return false
       end
 
-      args = options.fetch(:args, []).map do |k, v|
-        case v
-        when TrueClass
-          "--#{k}"
-        when FalseClass
-          nil
-        else
-          "--#{k}=#{v}"
+      true
+    end
+
+    def install(name, preinstall: true, no_upgrade: false, verbose: false, force: false, **options)
+      return true unless preinstall
+
+      full_name = options.fetch(:full_name, name)
+
+      install_result = if installed_casks.include?(name) && upgrading?(no_upgrade, name, options)
+        status = "#{options[:greedy] ? "may not be" : "not"} up-to-date"
+        puts "Upgrading #{name} cask. It is installed but #{status}." if verbose
+        Bundle.brew("upgrade", "--cask", full_name, verbose:)
+      else
+        args = options.fetch(:args, []).filter_map do |k, v|
+          case v
+          when TrueClass
+            "--#{k}"
+          when FalseClass
+            nil
+          else
+            "--#{k}=#{v}"
+          end
         end
-      end.compact
 
-      puts "Installing #{name} cask. It is not currently installed." if verbose
+        args << "--force" if force
+        args << "--adopt" unless args.include?("--force")
+        args.uniq!
 
-      return :failed unless Bundle.system "brew", "install", "--cask", full_name, *args, verbose: verbose
+        with_args = " with #{args.join(" ")}" if args.present?
+        puts "Installing #{name} cask#{with_args}. It is not currently installed." if verbose
 
-      installed_casks << name
-      :success
+        if Bundle.brew("install", "--cask", full_name, *args, verbose:)
+          installed_casks << name
+          true
+        else
+          false
+        end
+      end
+      result = install_result
+
+      if cask_installed?(name)
+        postinstall_result = postinstall_change_state!(name:, options:, verbose:)
+        result &&= postinstall_result
+      end
+
+      result
+    end
+
+    def postinstall_change_state!(name:, options:, verbose:)
+      postinstall = options.fetch(:postinstall, nil)
+      return true if postinstall.blank?
+
+      puts "Running postinstall for #{@name}: #{postinstall}" if verbose
+      Kernel.system(postinstall)
     end
 
     def self.cask_installed_and_up_to_date?(cask, no_upgrade: false)
@@ -65,10 +101,6 @@ module Bundle
 
     def outdated_casks
       @outdated_casks ||= Bundle::CaskDumper.outdated_cask_names
-    end
-
-    def all_outdated_casks
-      @all_outdated_casks ||= Bundle::CaskDumper.outdated_cask_names(greedy: true)
     end
   end
 end

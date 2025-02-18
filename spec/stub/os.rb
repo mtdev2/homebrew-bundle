@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "ostruct"
+
 module MacOS
   module CLT
     def self.version
@@ -20,7 +22,7 @@ module MacOS
   end
 
   def version
-    :catalina
+    OpenStruct.new to_sym: :catalina, prerelease?: false
   end
 end
 

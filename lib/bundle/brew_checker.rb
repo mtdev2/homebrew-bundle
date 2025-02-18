@@ -1,3 +1,4 @@
+# typed: true
 # frozen_string_literal: true
 
 module Bundle
@@ -7,7 +8,7 @@ module Bundle
       PACKAGE_TYPE_NAME = "Formula"
 
       def installed_and_up_to_date?(formula, no_upgrade: false)
-        Bundle::BrewInstaller.formula_installed_and_up_to_date?(formula, no_upgrade: no_upgrade)
+        Bundle::BrewInstaller.formula_installed_and_up_to_date?(formula, no_upgrade:)
       end
     end
   end

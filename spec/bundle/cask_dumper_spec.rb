@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "spec_helper"
+require "cask"
 
 describe Bundle::CaskDumper do
   subject(:dumper) { described_class }
@@ -34,24 +35,30 @@ describe Bundle::CaskDumper do
     it "dumps as empty string" do
       expect(dumper.dump).to eql("")
     end
+
+    it "doesn’t want to greedily update a non-installed cask" do
+      expect(dumper.cask_is_outdated_using_greedy?("foo")).to be(false)
+    end
   end
 
   context "when casks `foo`, `bar` and `baz` are installed, with `baz` being a formula requirement" do
+    let(:foo) { instance_double(Cask::Cask, to_s: "foo", desc: nil, config: nil) }
+    let(:baz) { instance_double(Cask::Cask, to_s: "baz", desc: "Software", config: nil) }
+    let(:bar) do
+      instance_double(
+        Cask::Cask, to_s:   "bar",
+                    desc:   nil,
+                    config: instance_double(Cask::Config,
+                                            explicit:   {
+                                              fontdir:   "/Library/Fonts",
+                                              languages: ["zh-TW"],
+                                            },
+                                            explicit_s: 'fontdir: "/Library/Fonts", language: "zh-TW"')
+      )
+    end
+
     before do
       described_class.reset!
-
-      foo = instance_double("Cask::Cask", to_s: "foo", desc: nil, config: nil)
-      baz = instance_double("Cask::Cask", to_s: "baz", desc: "Software", config: nil)
-      bar = instance_double(
-        "Cask::Cask", to_s:   "bar",
-                      desc:   nil,
-                      config: instance_double("Cask::Cask.config",
-                                              explicit:   {
-                                                fontdir:   "/Library/Fonts",
-                                                languages: ["zh-TW"],
-                                              },
-                                              explicit_s: 'fontdir: "/Library/Fonts", language: "zh-TW"')
-      )
 
       allow(Bundle).to receive(:cask_installed?).and_return(true)
       allow(Cask::Caskroom).to receive(:casks).and_return([foo, bar, baz])
@@ -70,6 +77,20 @@ describe Bundle::CaskDumper do
       EOS
       expect(dumper.dump(describe: true)).to eql(expected.chomp)
     end
+
+    it "doesn’t want to greedily update a non-installed cask" do
+      expect(dumper.cask_is_outdated_using_greedy?("qux")).to be(false)
+    end
+
+    it "wants to greedily update foo if there is an update available" do
+      expect(foo).to receive(:outdated?).with(greedy: true).and_return(true)
+      expect(dumper.cask_is_outdated_using_greedy?("foo")).to be(true)
+    end
+
+    it "does not want to greedily update bar if there is no update available" do
+      expect(bar).to receive(:outdated?).with(greedy: true).and_return(false)
+      expect(dumper.cask_is_outdated_using_greedy?("bar")).to be(false)
+    end
   end
 
   describe "#formula_dependencies" do
@@ -86,8 +107,8 @@ describe Bundle::CaskDumper do
     context "when multiple casks have the same dependency" do
       before do
         described_class.reset!
-        foo = instance_double("Cask::Cask", to_s: "foo", depends_on: { formula: ["baz", "qux"] })
-        bar = instance_double("Cask::Cask", to_s: "bar", depends_on: {})
+        foo = instance_double(Cask::Cask, to_s: "foo", depends_on: { formula: ["baz", "qux"] })
+        bar = instance_double(Cask::Cask, to_s: "bar", depends_on: {})
         allow(Cask::Caskroom).to receive(:casks).and_return([foo, bar])
         allow(Bundle).to receive(:cask_installed?).and_return(true)
       end

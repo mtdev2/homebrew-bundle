@@ -5,24 +5,28 @@ require "spec_helper"
 describe Bundle::Brewfile do
   describe "path" do
     subject(:path) do
-      described_class.path(dash_writes_to_stdout: dash_writes_to_stdout, global: has_global, file: file_value)
+      described_class.path(dash_writes_to_stdout:, global: has_global, file: file_value)
     end
 
     let(:dash_writes_to_stdout) { false }
+    let(:env_bundle_file_global_value) { nil }
     let(:env_bundle_file_value) { nil }
+    let(:env_user_config_home_value) { "/Users/username/.homebrew" }
     let(:file_value) { nil }
     let(:has_global) { false }
+    let(:config_dir_brewfile_exist) { false }
 
     before do
-      original_method = ENV.method(:[])
-      allow(ENV).to receive(:[]) do |env_string|
-        case env_string
-        when "HOMEBREW_BUNDLE_FILE"
-          env_bundle_file_value
-        else
-          original_method.call(env_string)
-        end
-      end
+      allow(ENV).to receive(:fetch).and_return(nil)
+      allow(ENV).to receive(:fetch).with("HOMEBREW_BUNDLE_FILE_GLOBAL", any_args)
+                                   .and_return(env_bundle_file_global_value)
+      allow(ENV).to receive(:fetch).with("HOMEBREW_BUNDLE_FILE", any_args)
+                                   .and_return(env_bundle_file_value)
+
+      allow(ENV).to receive(:fetch).with("HOMEBREW_USER_CONFIG_HOME", any_args)
+                                   .and_return(env_user_config_home_value)
+      allow(File).to receive(:exist?).with("/Users/username/.homebrew/Brewfile")
+                                     .and_return(config_dir_brewfile_exist)
     end
 
     context "when `file` is specified with a relative path" do
@@ -127,16 +131,25 @@ describe Bundle::Brewfile do
 
     context "when `global` is true" do
       let(:has_global) { true }
-      let(:expected_pathname) { Pathname.new("#{ENV["HOME"]}/.Brewfile") }
+      let(:expected_pathname) { Pathname.new("#{Dir.home}/.Brewfile") }
 
       it "returns the expected path" do
         expect(path).to eq(expected_pathname)
       end
 
+      context "when HOMEBREW_BUNDLE_FILE_GLOBAL is set" do
+        let(:env_bundle_file_global_value) { "/path/to/Brewfile" }
+        let(:expected_pathname) { Pathname.new(env_bundle_file_global_value) }
+
+        it "returns the value specified by the environment variable" do
+          expect(path).to eq(expected_pathname)
+        end
+      end
+
       context "when HOMEBREW_BUNDLE_FILE is set" do
         let(:env_bundle_file_value) { "/path/to/Brewfile" }
 
-        it "returns the value specified by `file` path" do
+        it "returns the value specified by the variable" do
           expect { path }.to raise_error(RuntimeError)
         end
       end
@@ -145,6 +158,15 @@ describe Bundle::Brewfile do
         let(:env_bundle_file_value) { "" }
 
         it "returns the value specified by `file` path" do
+          expect(path).to eq(expected_pathname)
+        end
+      end
+
+      context "when HOMEBREW_USER_CONFIG_HOME/Brewfile exists" do
+        let(:config_dir_brewfile_exist) { true }
+        let(:expected_pathname) { Pathname.new("#{env_user_config_home_value}/Brewfile") }
+
+        it "returns the expected path" do
           expect(path).to eq(expected_pathname)
         end
       end

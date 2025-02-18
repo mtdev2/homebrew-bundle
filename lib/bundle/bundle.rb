@@ -1,3 +1,4 @@
+# typed: true
 # frozen_string_literal: true
 
 require "English"
@@ -8,7 +9,7 @@ module Bundle
       return super cmd, *args if verbose
 
       logs = []
-      success = nil
+      success = T.let(nil, T.nilable(T::Boolean))
       IO.popen([cmd, *args], err: [:child, :out]) do |pipe|
         while (buf = pipe.gets)
           logs << buf
@@ -21,33 +22,61 @@ module Bundle
       success
     end
 
+    def brew(*args, verbose: false)
+      system(HOMEBREW_BREW_FILE, *args, verbose:)
+    end
+
     def mas_installed?
-      @mas_installed ||= begin
-        !which("mas").nil?
-      end
+      @mas_installed ||= which_formula("mas")
+    end
+
+    def vscode_installed?
+      @vscode_installed ||= which("code").present?
     end
 
     def whalebrew_installed?
-      @whalebrew_installed ||= begin
-        !which("whalebrew").nil?
-      end
-    end
-
-    def mas_signedin?
-      Kernel.system "mas account &>/dev/null"
+      @whalebrew_installed ||= which_formula("whalebrew")
     end
 
     def cask_installed?
-      @cask_installed ||= begin
-        File.directory?("#{HOMEBREW_PREFIX}/Caskroom") &&
-          File.directory?("#{HOMEBREW_REPOSITORY}/Library/Taps/homebrew/homebrew-cask")
-      end
+      @cask_installed ||= File.directory?("#{HOMEBREW_PREFIX}/Caskroom") &&
+                          (File.directory?("#{HOMEBREW_LIBRARY}/Taps/homebrew/homebrew-cask") ||
+                           !Homebrew::EnvConfig.no_install_from_api?)
     end
 
     def services_installed?
-      @services_installed ||= begin
-        !which("services.rb").nil?
+      @services_installed ||= which("services.rb").present?
+    end
+
+    def which_formula(name)
+      formula = Formulary.factory(name)
+      ENV["PATH"] = "#{formula.opt_bin}:#{ENV.fetch("PATH", nil)}" if formula.any_version_installed?
+      which(name).present?
+    end
+
+    def exchange_uid_if_needed!(&block)
+      euid = Process.euid
+      uid = Process.uid
+      return yield if euid == uid
+
+      old_euid = euid
+      process_reexchangeable = Process::UID.re_exchangeable?
+      if process_reexchangeable
+        Process::UID.re_exchange
+      else
+        Process::Sys.seteuid(uid)
       end
+
+      home = T.must(Etc.getpwuid(Process.uid)).dir
+      return_value = with_env("HOME" => home, &block)
+
+      if process_reexchangeable
+        Process::UID.re_exchange
+      else
+        Process::Sys.seteuid(old_euid)
+      end
+
+      return_value
     end
   end
 end

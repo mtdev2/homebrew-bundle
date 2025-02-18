@@ -1,18 +1,20 @@
 # frozen_string_literal: true
 
+require "ostruct"
 require "spec_helper"
 require "tsort"
 require "formula"
 require "tab"
+require "utils/bottles"
 
 describe Bundle::BrewDumper do
   subject(:dumper) { described_class }
 
   let(:foo) do
-    instance_double("Formula",
+    instance_double(Formula,
                     name:                   "foo",
                     desc:                   "foobar",
-                    oldname:                "oldfoo",
+                    oldnames:               ["oldfoo"],
                     full_name:              "qux/quuz/foo",
                     any_version_installed?: true,
                     aliases:                ["foobar"],
@@ -24,7 +26,8 @@ describe Bundle::BrewDumper do
                     keg_only?:              true,
                     pinned?:                false,
                     outdated?:              false,
-                    bottle_defined?:        false)
+                    stable:                 OpenStruct.new(bottle_defined?: false, bottled?: false),
+                    tap:                    OpenStruct.new(official?: false))
   end
   let(:foo_hash) do
     {
@@ -32,6 +35,7 @@ describe Bundle::BrewDumper do
       any_version_installed?:   true,
       args:                     [],
       bottle:                   false,
+      bottled:                  false,
       build_dependencies:       [],
       conflicts_with:           [],
       dependencies:             [],
@@ -41,19 +45,20 @@ describe Bundle::BrewDumper do
       installed_on_request?:    false,
       link?:                    nil,
       name:                     "foo",
-      oldname:                  "oldfoo",
+      oldnames:                 ["oldfoo"],
       outdated?:                false,
       pinned?:                  false,
       poured_from_bottle?:      false,
       version:                  nil,
+      official_tap:             false,
     }
   end
   let(:bar) do
     linked_keg = Pathname("/usr/local").join("var").join("homebrew").join("linked").join("bar")
-    instance_double("Formula",
+    instance_double(Formula,
                     name:                   "bar",
                     desc:                   "barfoo",
-                    oldname:                nil,
+                    oldnames:               [],
                     full_name:              "bar",
                     any_version_installed?: true,
                     aliases:                [],
@@ -65,8 +70,9 @@ describe Bundle::BrewDumper do
                     keg_only?:              false,
                     pinned?:                true,
                     outdated?:              true,
-                    bottle_defined?:        true,
-                    linked_keg:             linked_keg,
+                    linked_keg:,
+                    stable:                 OpenStruct.new(bottle_defined?: true, bottled?: true),
+                    tap:                    OpenStruct.new(official?: true),
                     bottle_hash:            {
                       cellar: ":any",
                       files:  {
@@ -91,6 +97,7 @@ describe Bundle::BrewDumper do
           },
         },
       },
+      bottled:                  true,
       build_dependencies:       [],
       conflicts_with:           [],
       dependencies:             [],
@@ -100,18 +107,19 @@ describe Bundle::BrewDumper do
       installed_on_request?:    false,
       link?:                    nil,
       name:                     "bar",
-      oldname:                  nil,
+      oldnames:                 [],
       outdated?:                true,
       pinned?:                  true,
       poured_from_bottle?:      true,
       version:                  "1.0",
+      official_tap:             true,
     }
   end
   let(:baz) do
-    instance_double("Formula",
+    instance_double(Formula,
                     name:                   "baz",
                     desc:                   "",
-                    oldname:                nil,
+                    oldnames:               [],
                     full_name:              "bazzles/bizzles/baz",
                     any_version_installed?: true,
                     aliases:                [],
@@ -123,7 +131,8 @@ describe Bundle::BrewDumper do
                     keg_only?:              false,
                     pinned?:                false,
                     outdated?:              false,
-                    bottle_defined?:        false)
+                    stable:                 OpenStruct.new(bottle_defined?: false, bottled?: false),
+                    tap:                    OpenStruct.new(official?: false))
   end
   let(:baz_hash) do
     {
@@ -131,6 +140,7 @@ describe Bundle::BrewDumper do
       any_version_installed?:   true,
       args:                     [],
       bottle:                   false,
+      bottled:                  false,
       build_dependencies:       ["bar"],
       conflicts_with:           [],
       dependencies:             ["bar"],
@@ -140,11 +150,12 @@ describe Bundle::BrewDumper do
       installed_on_request?:    false,
       link?:                    false,
       name:                     "baz",
-      oldname:                  nil,
+      oldnames:                 [],
       outdated?:                false,
       pinned?:                  false,
       poured_from_bottle?:      false,
       version:                  nil,
+      official_tap:             false,
     }
   end
 
@@ -185,13 +196,14 @@ describe Bundle::BrewDumper do
     it "returns an array for all formulae" do
       expect(Formula).to receive(:installed).and_return([foo, bar, baz])
       expect(bar.linked_keg).to receive(:realpath).and_return(OpenStruct.new(basename: "1.0"))
-      expect(Tab).to receive(:for_keg).with(bar.linked_keg).and_return \
-        instance_double("Tab",
+      expect(Tab).to receive(:for_keg).with(bar.linked_keg).and_return(
+        instance_double(Tab,
                         installed_as_dependency: false,
                         installed_on_request:    false,
                         poured_from_bottle:      true,
                         runtime_dependencies:    [],
-                        used_options:            [])
+                        used_options:            []),
+      )
       expect(dumper.formulae_by_full_name).to eql({
         "bar"                 => bar_hash,
         "qux/quuz/foo"        => foo_hash,
@@ -210,6 +222,7 @@ describe Bundle::BrewDumper do
   describe "#dump" do
     it "returns a dump string with installed formulae" do
       expect(Formula).to receive(:installed).and_return([foo, bar, baz])
+      allow(Utils).to receive(:safe_popen_read).and_return("")
       expected = <<~EOS
         # barfoo
         brew "bar"

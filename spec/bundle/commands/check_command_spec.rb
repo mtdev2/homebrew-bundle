@@ -4,7 +4,7 @@ require "spec_helper"
 
 describe Bundle::Commands::Check do
   let(:do_check) do
-    described_class.run(no_upgrade: no_upgrade, verbose: verbose)
+    described_class.run(no_upgrade:, verbose:)
   end
   let(:no_upgrade) { false }
   let(:verbose) { false }
@@ -18,10 +18,11 @@ describe Bundle::Commands::Check do
     it "does not raise an error" do
       allow_any_instance_of(Pathname).to receive(:read).and_return("")
       nothing = []
-      allow(Bundle::Checker).to receive(:casks_to_install).and_return(nothing)
-      allow(Bundle::Checker).to receive(:formulae_to_install).and_return(nothing)
-      allow(Bundle::Checker).to receive(:apps_to_install).and_return(nothing)
-      allow(Bundle::Checker).to receive(:taps_to_tap).and_return(nothing)
+      allow(Bundle::Checker).to receive_messages(casks_to_install:      nothing,
+                                                 formulae_to_install:   nothing,
+                                                 apps_to_install:       nothing,
+                                                 taps_to_tap:           nothing,
+                                                 extensions_to_install: nothing)
       expect { do_check }.not_to raise_error
     end
   end
@@ -93,8 +94,7 @@ describe Bundle::Commands::Check do
     before do
       Bundle::Checker.reset!
       allow(Bundle::Checker::MacAppStoreChecker).to receive(:installed_and_up_to_date?).and_return(false)
-      allow(Bundle::BrewInstaller).to receive(:installed_formulae).and_return(["abc", "def"])
-      allow(Bundle::BrewInstaller).to receive(:upgradable_formulae).and_return([])
+      allow(Bundle::BrewInstaller).to receive_messages(installed_formulae: ["abc", "def"], upgradable_formulae: [])
       allow(Bundle::BrewServices).to receive(:started?).with("abc").and_return(true)
       allow(Bundle::BrewServices).to receive(:started?).with("def").and_return(false)
     end
@@ -112,20 +112,20 @@ describe Bundle::Commands::Check do
 
     context "when restart_service is true" do
       it "raises an error" do
-        allow_any_instance_of(Pathname).to \
-          receive(:read).and_return("brew 'abc', restart_service: true\nbrew 'def', restart_service: true")
-        allow_any_instance_of(Bundle::Checker::MacAppStoreChecker).to \
-          receive(:format_checkable).and_return(1 => "foo")
+        allow_any_instance_of(Pathname)
+          .to receive(:read).and_return("brew 'abc', restart_service: true\nbrew 'def', restart_service: true")
+        allow_any_instance_of(Bundle::Checker::MacAppStoreChecker)
+          .to receive(:format_checkable).and_return(1 => "foo")
         expect { do_check }.to raise_error(SystemExit).and output(expected_output).to_stdout
       end
     end
 
     context "when start_service is true" do
       it "raises an error" do
-        allow_any_instance_of(Pathname).to \
-          receive(:read).and_return("brew 'abc', start_service: true\nbrew 'def', start_service: true")
-        allow_any_instance_of(Bundle::Checker::MacAppStoreChecker).to \
-          receive(:format_checkable).and_return(1 => "foo")
+        allow_any_instance_of(Pathname)
+          .to receive(:read).and_return("brew 'abc', start_service: true\nbrew 'def', start_service: true")
+        allow_any_instance_of(Bundle::Checker::MacAppStoreChecker)
+          .to receive(:format_checkable).and_return(1 => "foo")
         expect { do_check }.to raise_error(SystemExit).and output(expected_output).to_stdout
       end
     end
@@ -149,10 +149,29 @@ describe Bundle::Commands::Check do
     end
 
     it "raises an error that doesn't mention upgrade" do
-      allow_any_instance_of(Pathname).to \
-        receive(:read).and_return("brew 'abc'")
-      allow_any_instance_of(Bundle::Checker::MacAppStoreChecker).to \
-        receive(:format_checkable).and_return(1 => "foo")
+      allow_any_instance_of(Pathname).to receive(:read).and_return("brew 'abc'")
+      allow_any_instance_of(Bundle::Checker::MacAppStoreChecker).to receive(:format_checkable).and_return(1 => "foo")
+      expect { do_check }.to raise_error(SystemExit).and output(expected_output).to_stdout
+    end
+  end
+
+  context "when extension not installed" do
+    let(:expected_output) do
+      <<~MSG
+        brew bundle can't satisfy your Brewfile's dependencies.
+        → VSCode Extension foo needs to be installed.
+        Satisfy missing dependencies with `brew bundle install`.
+      MSG
+    end
+    let(:verbose) { true }
+
+    before do
+      Bundle::Checker.reset!
+      allow(Bundle::Checker::VscodeExtensionChecker).to receive(:installed_and_up_to_date?).and_return(false)
+    end
+
+    it "raises an error that doesn't mention upgrade" do
+      allow_any_instance_of(Pathname).to receive(:read).and_return("vscode 'foo'")
       expect { do_check }.to raise_error(SystemExit).and output(expected_output).to_stdout
     end
   end
@@ -163,9 +182,26 @@ describe Bundle::Commands::Check do
       allow(Bundle::Checker).to receive(:taps_to_tap).and_return(["asdf"])
     end
 
-    it "does not check for tasks" do
+    it "does not check for casks" do
       expect(Bundle::Checker).not_to receive(:casks_to_install)
       expect { do_check }.to raise_error(SystemExit)
+    end
+
+    it "does not check for formulae" do
+      expect(Bundle::Checker).not_to receive(:formulae_to_install)
+      expect { do_check }.to raise_error(SystemExit)
+    end
+
+    it "does not check for apps" do
+      expect(Bundle::Checker).not_to receive(:apps_to_install)
+      expect { do_check }.to raise_error(SystemExit)
+    end
+  end
+
+  context "when there are VSCode extensions to install" do
+    before do
+      allow_any_instance_of(Pathname).to receive(:read).and_return("")
+      allow(Bundle::Checker).to receive(:extensions_to_install).and_return(["asdf"])
     end
 
     it "does not check for formulae" do
@@ -182,10 +218,10 @@ describe Bundle::Commands::Check do
   context "when there are formulae to install" do
     before do
       allow_any_instance_of(Pathname).to receive(:read).and_return("")
-      allow(Bundle::Checker).to receive(:taps_to_tap).and_return([])
-      allow(Bundle::Checker).to receive(:casks_to_install).and_return([])
-      allow(Bundle::Checker).to receive(:apps_to_install).and_return([])
-      allow(Bundle::Checker).to receive(:formulae_to_install).and_return(["one"])
+      allow(Bundle::Checker).to receive_messages(taps_to_tap:         [],
+                                                 casks_to_install:    [],
+                                                 apps_to_install:     [],
+                                                 formulae_to_install: ["one"])
     end
 
     it "does not start formulae" do
@@ -217,13 +253,21 @@ describe Bundle::Commands::Check do
       expect_any_instance_of(Bundle::Checker::MacAppStoreChecker).to receive(:exit_early_check).once.and_call_original
       expect { do_check }.to raise_error(SystemExit)
     end
+
+    it "stops checking after the first VSCode extension" do
+      allow_any_instance_of(Pathname).to receive(:read).and_return("vscode 'abc'\nvscode 'def'")
+
+      expect_any_instance_of(Bundle::Checker::VscodeExtensionChecker).to \
+        receive(:exit_early_check).once.and_call_original
+      expect { do_check }.to raise_error(SystemExit)
+    end
   end
 
   context "when a new checker fails to implement installed_and_up_to_date" do
     it "raises an exception" do
-      TestChecker = Class.new(Bundle::Checker::Base) do
+      stub_const("TestChecker", Class.new(Bundle::Checker::Base) do
         class_eval("PACKAGE_TYPE = :test", __FILE__, __LINE__)
-      end.freeze
+      end.freeze)
 
       test_entry = Bundle::Dsl::Entry.new(:test, "test")
       expect { TestChecker.new.find_actionable([test_entry]) }.to raise_error(NotImplementedError)

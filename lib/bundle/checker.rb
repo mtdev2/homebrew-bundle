@@ -1,3 +1,4 @@
+# typed: false
 # frozen_string_literal: true
 
 module Bundle
@@ -9,7 +10,7 @@ module Bundle
 
       def exit_early_check(packages, no_upgrade:)
         work_to_be_done = packages.find do |pkg|
-          !installed_and_up_to_date?(pkg, no_upgrade: no_upgrade)
+          !installed_and_up_to_date?(pkg, no_upgrade:)
         end
 
         Array(work_to_be_done)
@@ -25,8 +26,8 @@ module Bundle
       end
 
       def full_check(packages, no_upgrade:)
-        packages.reject { |pkg| installed_and_up_to_date?(pkg, no_upgrade: no_upgrade) }
-                .map { |pkg| failure_reason(pkg, no_upgrade: no_upgrade) }
+        packages.reject { |pkg| installed_and_up_to_date?(pkg, no_upgrade:) }
+                .map { |pkg| failure_reason(pkg, no_upgrade:) }
       end
 
       def checkable_entries(all_entries)
@@ -46,9 +47,9 @@ module Bundle
         requested = format_checkable entries
 
         if exit_on_first_error
-          exit_early_check(requested, no_upgrade: no_upgrade)
+          exit_early_check(requested, no_upgrade:)
         else
-          full_check(requested, no_upgrade: no_upgrade)
+          full_check(requested, no_upgrade:)
         end
       end
     end
@@ -58,15 +59,16 @@ module Bundle
     CheckResult = Struct.new :work_to_be_done, :errors
 
     CHECKS = {
-      taps_to_tap:         "Taps",
-      casks_to_install:    "Casks",
-      apps_to_install:     "Apps",
-      formulae_to_install: "Formulae",
-      formulae_to_start:   "Services",
+      taps_to_tap:           "Taps",
+      casks_to_install:      "Casks",
+      extensions_to_install: "VSCode Extensions",
+      apps_to_install:       "Apps",
+      formulae_to_install:   "Formulae",
+      formulae_to_start:     "Services",
     }.freeze
 
     def check(global: false, file: nil, exit_on_first_error: false, no_upgrade: false, verbose: false)
-      @dsl ||= Bundle::Dsl.new(Brewfile.read(global: global, file: file))
+      @dsl ||= Brewfile.read(global:, file:)
 
       check_method_names = CHECKS.keys
 
@@ -75,7 +77,7 @@ module Bundle
 
       work_to_be_done = check_method_names.public_send(enumerator) do |check_method|
         check_errors =
-          send(check_method, exit_on_first_error: exit_on_first_error, no_upgrade: no_upgrade, verbose: verbose)
+          send(check_method, exit_on_first_error:, no_upgrade:, verbose:)
         any_errors = check_errors.any?
         errors.concat(check_errors) if any_errors
         any_errors
@@ -89,35 +91,42 @@ module Bundle
     def casks_to_install(exit_on_first_error: false, no_upgrade: false, verbose: false)
       Bundle::Checker::CaskChecker.new.find_actionable(
         @dsl.entries,
-        exit_on_first_error: exit_on_first_error, no_upgrade: no_upgrade, verbose: verbose,
+        exit_on_first_error:, no_upgrade:, verbose:,
       )
     end
 
     def formulae_to_install(exit_on_first_error: false, no_upgrade: false, verbose: false)
       Bundle::Checker::BrewChecker.new.find_actionable(
         @dsl.entries,
-        exit_on_first_error: exit_on_first_error, no_upgrade: no_upgrade, verbose: verbose,
+        exit_on_first_error:, no_upgrade:, verbose:,
       )
     end
 
     def taps_to_tap(exit_on_first_error: false, no_upgrade: false, verbose: false)
       Bundle::Checker::TapChecker.new.find_actionable(
         @dsl.entries,
-        exit_on_first_error: exit_on_first_error, no_upgrade: no_upgrade, verbose: verbose,
+        exit_on_first_error:, no_upgrade:, verbose:,
       )
     end
 
     def apps_to_install(exit_on_first_error: false, no_upgrade: false, verbose: false)
       Bundle::Checker::MacAppStoreChecker.new.find_actionable(
         @dsl.entries,
-        exit_on_first_error: exit_on_first_error, no_upgrade: no_upgrade, verbose: verbose,
+        exit_on_first_error:, no_upgrade:, verbose:,
+      )
+    end
+
+    def extensions_to_install(exit_on_first_error: false, no_upgrade: false, verbose: false)
+      Bundle::Checker::VscodeExtensionChecker.new.find_actionable(
+        @dsl.entries,
+        exit_on_first_error:, no_upgrade:, verbose:,
       )
     end
 
     def formulae_to_start(exit_on_first_error: false, no_upgrade: false, verbose: false)
       Bundle::Checker::BrewServiceChecker.new.find_actionable(
         @dsl.entries,
-        exit_on_first_error: exit_on_first_error, no_upgrade: no_upgrade, verbose: verbose,
+        exit_on_first_error:, no_upgrade:, verbose:,
       )
     end
 

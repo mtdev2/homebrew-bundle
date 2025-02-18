@@ -1,8 +1,11 @@
-name: GitHub Actions CI
+name: CI
 on:
   push:
     branches: master
   pull_request:
+permissions:
+  contents: read
+
 jobs:
   tests:
     runs-on: ${{ matrix.os }}
@@ -17,7 +20,7 @@ jobs:
 
     - name: Cache Homebrew Bundler RubyGems
       id: cache
-      uses: actions/cache@v1
+      uses: actions/cache@1bd1e32a3bdc45362d1e726936510720a7c30a57 # v4.2.0
       with:
         path: ${{ steps.set-up-homebrew.outputs.gems-path }}
         key: ${{ runner.os }}-rubygems-${{ steps.set-up-homebrew.outputs.gems-hash }}
@@ -30,18 +33,18 @@ jobs:
     - run: brew test-bot --only-tap-syntax
 
     - name: Set up Ruby
-      if: matrix.os == 'ubuntu-latest'
-      uses: actions/setup-ruby@master
+      uses: ruby/setup-ruby@32110d4e311bd8996b2a82bf2a43b714ccc91777 # v1.221.0
       with:
-        ruby-version: '2.6'
-
-    - name: Install Bundler
-      run: gem install bundler -v "~>1"
-
-    - name: Install Homebrew/homebrew-bundle RubyGems
-      run: bundle install --jobs 4 --retry 3
+        bundler-cache: true
 
     - name: Run RSpec tests
       run: bundle exec rspec
-      env:
-        CODECOV_TOKEN: d8abdd06-9193-47d3-9da9-b4b25064e49b
+
+    - uses: codecov/codecov-action@13ce06bfc6bbe3ecf90edbbf1bc32fe5978ca1d3 # v5.3.1
+      if: always()
+
+    - name: Test that installing works
+      run: |
+        echo 'brew "hello"' > ./Brewfile
+        brew bundle
+        hello

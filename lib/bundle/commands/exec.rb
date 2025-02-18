@@ -1,3 +1,4 @@
+# typed: false
 # frozen_string_literal: true
 
 require "exceptions"
@@ -25,22 +26,39 @@ module Bundle
           command_path = command_path.dirname.to_s
         end
 
-        brewfile = Bundle::Dsl.new(Brewfile.read(global: global, file: file))
+        @dsl = Brewfile.read(global:, file:)
 
         require "formula"
         require "formulary"
 
-        ENV.deps = brewfile.entries.map do |entry|
-          next unless entry.type == :brew
+        ENV.deps = @dsl.entries.filter_map do |entry|
+          next if entry.type != :brew
 
-          f = Formulary.factory(entry.name)
-          [f, f.recursive_dependencies.map(&:to_formula)]
-        end.flatten.compact
-        ENV.keg_only_deps = ENV.deps.select(&:keg_only?)
+          Formulary.factory(entry.name)
+        end
+
+        # Allow setting all dependencies to be keg-only
+        # (i.e. should be explicitly in HOMEBREW_*PATHs ahead of HOMEBREW_PREFIX)
+        ENV.keg_only_deps = if ENV["HOMEBREW_BUNDLE_EXEC_ALL_KEG_ONLY_DEPS"].present?
+          ENV.delete("HOMEBREW_BUNDLE_EXEC_ALL_KEG_ONLY_DEPS")
+          ENV.deps
+        else
+          ENV.deps.select(&:keg_only?)
+        end
         ENV.setup_build_environment
 
         # Enable compiler flag filtering
         ENV.refurbish_args
+
+        # Set up `nodenv`, `pyenv` and `rbenv` if present.
+        env_formulae = %w[nodenv pyenv rbenv]
+        ENV.deps.each do |dep|
+          dep_name = dep.name
+          next unless env_formulae.include?(dep_name)
+
+          dep_root = ENV.fetch("HOMEBREW_#{dep_name.upcase}_ROOT", "#{Dir.home}/.#{dep_name}")
+          ENV.prepend_path "PATH", Pathname.new(dep_root)/"shims"
+        end
 
         # Setup pkg-config, if present, to help locate packages
         pkgconfig = Formulary.factory("pkg-config")
@@ -48,6 +66,27 @@ module Bundle
 
         # Ensure the Ruby path we saved goes before anything else, if the command was in the PATH
         ENV.prepend_path "PATH", command_path if command_path.present?
+
+        # Replace the formula versions from the environment variables
+        formula_versions = {}
+        ENV.each do |key, value|
+          match = key.match(/^HOMEBREW_BUNDLE_EXEC_FORMULA_VERSION_(.+)$/)
+          next if match.blank?
+
+          formula_name = match[1]
+          next if formula_name.blank?
+
+          ENV.delete(key)
+          formula_versions[formula_name.downcase] = value
+        end
+        formula_versions.each do |formula_name, formula_version|
+          ENV.each do |key, value|
+            opt = %r{/opt/#{formula_name}([/:$])}
+            next unless value.match(opt)
+
+            ENV[key] = value.gsub(opt, "/Cellar/#{formula_name}/#{formula_version}\\1")
+          end
+        end
 
         exec(*args)
       end

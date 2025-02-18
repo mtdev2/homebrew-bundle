@@ -1,3 +1,4 @@
+# typed: true
 # frozen_string_literal: true
 
 module Bundle
@@ -11,12 +12,10 @@ module Bundle
     def images
       return [] unless Bundle.whalebrew_installed?
 
-      @images ||= begin
-        `whalebrew list 2>/dev/null`.split("\n")
-                                    .reject { |image| image.start_with?("COMMAND ") }
-                                    .map { |image| image.sub(/\w*\s+/, "") }
-                                    .uniq
-      end
+      @images ||= `whalebrew list 2>/dev/null`.split("\n")
+                                              .reject { |line| line.start_with?("COMMAND ") }
+                                              .map { |line| line.split(/\s+/).last }
+                                              .uniq
     end
 
     def dump
